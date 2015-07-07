@@ -13,8 +13,7 @@ immutable JSONattributes Required = JSONattributes(true);
 
 private:
 /* Basic sanitization to turn a string into a valid D identifier. Simply drops
- * all non-identifier-allowed characters, keeping [a-zA-Z_][0-9a-zA-Z_]*
- */
+ * all non-identifier-allowed characters, keeping [a-zA-Z_][0-9a-zA-Z_]* */
 pure string sanitize(string name) {
 	string ret = removechars(name, "^0-9a-zA-z_");
 	munch(ret, "0-9");
@@ -92,6 +91,8 @@ template validateJSONspec(string[] name, Type, Orphan, Tail...) {
 	static assert(0, "Invalid JSON specification (attributes or property name(s) expected) at: " ~ specErrorString);
 }
 
+/* Template constrained to not trigger on valid start-of-next-field values, per
+ * greedy template matching */
 template validateJSONspec(string[] name, Type, alias Orphan, Tail...)
 if (!is(typeof(Orphan) : string) && !is(typeof(Orphan) : string[]) && !is(typeof(Orphan) : JSONattributes)) {
 	mixin JSONspecError!(Orphan, Tail);
@@ -106,24 +107,112 @@ mixin template JSONspecError(alias Orphan, Tail...) {
 	enum string specErrorString = Tail.length ? Tuple!(Orphan, Tail).stringof[6 .. $ - 1] : Orphan.stringof;
 }
 
-/* Completely generic templated struct (with the names and types of fields given
- * as parameters) which automagically generates members/parser/printer
+version(unittest) {
+	enum string SpecGroupNames(string prefix, int num : 0) = "";
+	enum string SpecGroupNames(string prefix, int num : 1) = `"` ~ prefix ~ `1"`;
+	enum string SpecGroupNames(string prefix, int num) = SpecGroupNames!(prefix, num - 1) ~ `,"` ~ prefix ~ to!string(num) ~ `"`;
+	enum string createSpecGroup(string prefix, int num) = "alias SpecGroup" ~ prefix ~ "= Tuple!(" ~ SpecGroupNames!("Spec" ~ prefix, num) ~ ");";
+}
+
+unittest {
+	/* Testing methodology: storing Tuples as compile-time static arrays of
+	 * either JSONobject specifications, or groups of specifications */
+	/* All these specs are valid and equivalent */
+	mixin(createSpecGroup!("A", 6));
+	alias SpecA1 = Tuple!("foo", int);
+	alias SpecA2 = Tuple!("foo", int, Default);
+	alias SpecA3 = Tuple!(["foo"], int);
+	alias SpecA4 = Tuple!(["foo"], int, Default);
+	alias SpecA5 = Tuple!(["foo", "foo"], int);
+	alias SpecA6 = Tuple!(["foo", "foo"], int, Default);
+
+	/* All these specs are valid and equivalent */
+	mixin(createSpecGroup!("B", 12));
+	alias SpecB1 = Tuple!("foo", int, "bar", int);
+	alias SpecB2 = Tuple!("foo", int, "bar", int, Default);
+	alias SpecB3 = Tuple!("foo", int, ["bar"], int);
+	alias SpecB4 = Tuple!("foo", int, ["bar"], int, Default);
+	alias SpecB5 = Tuple!("foo", int, ["bar", "bar"], int);
+	alias SpecB6 = Tuple!("foo", int, ["bar", "bar"], int, Default);
+	alias SpecB7 = Tuple!(["foo", "foo"], int, Default, "bar", int);
+	alias SpecB8 = Tuple!(["foo", "foo"], int, Default, "bar", int, Default);
+	alias SpecB9 = Tuple!(["foo", "foo"], int, Default, ["bar"], int);
+	alias SpecB10 = Tuple!(["foo", "foo"], int, Default, ["bar"], int, Default);
+	alias SpecB11 = Tuple!(["foo", "foo"], int, Default, ["bar", "bar"], int);
+	alias SpecB12 = Tuple!(["foo", "foo"], int, Default, ["bar", "bar"], int, Default);
+
+	/* All these specs are valid */
+	mixin(createSpecGroup!("I", 1));
+	alias SpecI1 = Tuple!();
+
+	/* All these specs are invalid */
+	mixin(createSpecGroup!("F", 23));
+	alias SpecF1 = Tuple!(3);
+	alias SpecF2 = Tuple!([]);
+	alias SpecF3 = Tuple!([3]);
+	alias SpecF4 = Tuple!(["foo"]);
+	alias SpecF5 = Tuple!(int);
+	alias SpecF6 = Tuple!(string);
+	alias SpecF7 = Tuple!(Default);
+	alias SpecF8 = Tuple!("foo", 3);
+	alias SpecF9 = Tuple!("foo", []);
+	alias SpecF10 = Tuple!("foo", [3]);
+	alias SpecF11 = Tuple!("foo", ["foo"]);
+	alias SpecF12 = Tuple!("foo", Default);
+	alias SpecF13 = Tuple!("foo", int, 3);
+	alias SpecF14 = Tuple!("foo", int, []);
+	alias specF15 = Tuple!("foo", int, [3]);
+	alias SpecF16 = Tuple!("foo", int, ["bar"]);
+	alias SpecF17 = Tuple!("foo", int, int);
+	alias SpecF18 = Tuple!("foo", int, string);
+	alias SpecF19 = Tuple!("foo", int, "bar", 3);
+	alias SpecF20 = Tuple!("foo", int, "bar", []);
+	alias SpecF21 = Tuple!("foo", int, "bar", [3]);
+	alias SpecF22 = Tuple!("foo", int, "bar", ["foo"]);
+	alias SpecF23 = Tuple!("foo", int, "bar", Default);
+
+	/* foreach over a tuple is compile-time unrolled to automate test farming */
+	foreach (S; Tuple!(SpecGroupA, SpecGroupB, SpecGroupI)) {
+		/* All of these specs are valid */
+		static assert(__traits(compiles, mixin("JSONobject!" ~ S)));
+	}
+
+	foreach (S1; SpecGroupA) {
+		foreach (S2; SpecGroupA) {
+			/* All of these specs are equivalent to each other */
+			static assert(mixin("is(JSONobject!" ~ S1 ~ " == JSONobject!" ~ S2 ~ ")"));
+		}
+	}
+
+	foreach (S1; SpecGroupB) {
+		foreach (S2; SpecGroupB) {
+			/* All of these specs are equivalent to each other */
+			static assert(mixin("is(JSONobject!" ~ S1 ~ " == JSONobject!" ~ S2 ~ ")"));
+		}
+	}
+
+	foreach (S; SpecGroupF) {
+		/* All of these specs are invalid */
+		static assert(!__traits(compiles, mixin("JSONobject!" ~ S)));
+	}
+}
+
+/* Completely generic templated struct (with the names and types of properties
+ * given as parameters) which automagically generates members/parser/printer
  * functionality.
  */
 struct JSONobjectImpl(Specification...) {
 
-	static assert(is(typeof(this) == JSONobjectImpl!(validateJSONspec!Specification)), "Invalid JSON specification");
+	static assert(is(this == JSONobjectImpl!(validateJSONspec!Specification)), "Invalid JSON specification");
 
 	mixin JSONvar_decl!Specification;
 
 	pure string toString() const {
-		mixin JSONprinter!Specification;
-		return "{" ~ print() ~ "}";
+		return "{" ~ JSONprinter!Specification() ~ "}";
 	}
 
 	this(string input) {
-		mixin JSONparser!Specification;
-		parse(input);
+		JSONparser(input);
 	}
 
 private:
@@ -133,48 +222,43 @@ private:
 	mixin template JSONvar_decl() {}
 
 	mixin template JSONvar_decl(string[] name, Type, JSONattributes attr, Tail...) {
-		mixin(Unqual!Type.stringof ~ " " ~ sanitize(name[1]) ~ ";");
+		mixin(Unqual!Type.stringof ~ " " ~ name[1] ~ ";");
 		mixin JSONvar_decl!Tail;
 	}
 
 	/* Recursive templates to compile-time construct the JSON-format pretty
 	 * printer function */
-	mixin template JSONprinter() {
-		string print() {
-			return "";
-		}
+	string JSONprinter()() const {
+		return "";
 	}
 
-	mixin template JSONprinter(string[] name, Type, JSONattributes attr, Tail...) {
-		string print() {
-			string ret = "";
+	string JSONprinter(string[] name, Type, JSONattributes attr, Tail...)() const {
+		string ret = "";
 
-			void printvar() {
-				ret = `"` ~ name[0] ~ `":`;
-				static if (isSomeString!Type) {
-					ret ~= `"`;
-				}
-				ret ~= to!string(mixin(name[1]));
-				static if (isSomeString!Type) {
-					ret ~= `"`;
-				}
+		void printvar() {
+			ret = `"` ~ name[0] ~ `":`;
+			static if (isSomeString!Type) {
+				ret ~= `"`;
 			}
+			ret ~= to!string(mixin(name[1]));
+			static if (isSomeString!Type) {
+				ret ~= `"`;
+			}
+		}
 
-			/* Expression tests if null can be implicitly converted to Type, in
-			 * which case an explicit null value can be stored for field "name"
-			 */
-			static if (!attr.required && is(typeof(null) : Type)) {
-				if (mixin(name[1]) !is null) {
-					printvar();
-				}
-			} else {
+		/* Expression tests if null can be implicitly converted to Type, in
+		 * which case an explicit null value can be stored for field "name"
+		 */
+		static if (!attr.required && is(typeof(null) : Type)) {
+			if (mixin(name[1]) !is null) {
 				printvar();
 			}
-
-			mixin JSONprinter!Tail tailprinter;
-			string tail = tailprinter.print();
-			return ret ~ (ret.length && tail.length ? "," : "") ~ tail;
+		} else {
+			printvar();
 		}
+
+		string tail = JSONprinter!Tail();
+		return ret ~ (ret.length && tail.length ? "," : "") ~ tail;
 	}
 
 	/* Compile-time string for the switch statement to handle all the property
@@ -189,131 +273,129 @@ private:
 			"matchCharacter(':');" ~
 			"skipWhitespace();" ~
 			`mixin JSONreadvar!("` ~ name[1] ~ `",` ~ Type.stringof ~ ") _read_" ~ name[1] ~ ";" ~
-			"_read_" ~ name[1] ~ ".read();" ~
-			"break;" ~ JSONvar_parsecases!Tail;
+			"_read_" ~ name[1] ~ ".JSONreadvar();" ~
+			"break;" ~
+			JSONvar_parsecases!Tail;
 
 	/* Various cases for parsing properties, by type. Currently only strings are
 	 * implemented */
-	mixin template JSONreadvar(string name, Type) {
-		void read() {
-			static assert(0, "Field parsing of type " ~ Type.stringof ~ " currently not implemented");
+	void JSONreadvar(string name, Type)() {
+		static assert(0, "Field parsing of type " ~ Type.stringof ~ " currently not implemented");
+	}
+
+	void JSONreadvar(string name, Type : void)() {
+		if (input[0 .. 4] == "null") {
+			input = input[4 .. $];
+		} else {
+			throw new ParseException(format(`Invalid input, "null" expected in: %s`, input));
 		}
 	}
 
-	mixin template JSONreadvar(string name, Type : void) {
-		void read() {
+	void JSONreadvar(string name, Type : bool)() {
+		if (input[0 .. 4] == "true") {
+			mixin(name) = true;
+			input = input[4 .. $];
+		} else if (input[0 .. 5] == "false") {
+			mixin(name) = false;
+			input = input[5 .. $];
+		} else {
+			throw new ParseException(format(`Invalid input, "true" or "false" expected in: %s`, input));
 		}
 	}
 
-	mixin template JSONreadvar(string name, Type : bool) {
-		void read() {
-		}
+	void JSONreadvar(string name, Type : long)() {
+//		static assert(0, "Not implemented");
 	}
 
-	mixin template JSONreadvar(string name, Type : long) {
-		void read() {
-		}
+	void JSONreadvar(string name, Type : real)() {
+//		static assert(0, "Not implemented");
 	}
 
-	mixin template JSONreadvar(string name, Type : real) {
-		void read() {
-		}
-	}
-
-	mixin template JSONreadvar(string name, Type : string) {
-		void read() {
-			mixin(sanitize(name)) = parseString();
-		}
+	void JSONreadvar(string name, Type : string)() {
+		mixin(name) = parseString();
 	}
 
 	/* Recursive templates to validate the read-in JSON object. Currently just
 	 * checks whether non-optional properties that could be null are not null */
-	mixin template JSONvar_validate() {
-		void validate() {}
-	}
+	void JSONvar_validate()() {}
 
-	mixin template JSONvar_validate(string[] name, Type, JSONattributes attr, Tail...) {
-		void validate() {
-			static if (attr.required && is(typeof(null) : Type)) {
-				if (mixin(name[1]) is null) {
-					throw new ParseException("Mandatory field " ~ name[0] ~ " not given");
-				}
+	void JSONvar_validate(string[] name, Type, JSONattributes attr, Tail...)() {
+		static if (attr.required && is(typeof(null) : Type)) {
+			if (mixin(name[1]) is null) {
+				throw new ParseException("Mandatory field " ~ name[0] ~ " not given");
 			}
-
-			mixin JSONvar_validate!Tail tail;
-			tail.validate();
 		}
+
+		JSONvar_validate!Tail();
 	}
 
 	/* Compile-time construction of the parser, which takes an input string and
 	 * fills in the properties of the JSON object */
-	mixin template JSONparser(Specification...) {
-		void parse(string input) {
-			/* Nested functions (and templates) are allowed, and they have full
-			 * access to variables in enclosing scope
-			 */
-			void skipWhitespace() {
-				munch(input, " \t\r\n");
+	void JSONparser(string input) {
+		void skipWhitespace() {
+			munch(input, " \t\r\n");
+		}
+
+		void matchCharacter(char c) {
+			if (input[0] == c) {
+				input = input[1 .. $];
+			} else {
+				throw new ParseException(format("Invalid input, %c expected in: %s", c, input));
 			}
+		}
 
-			void matchCharacter(char c) {
-				if (input[0] == c) {
-					input = input[1 .. $];
-				} else {
-					throw new ParseException(format("Invalid input, %c expected in: %s", c, input));
-				}
-			}
-
-			string parseString() {
-				ptrdiff_t index = 0;
-				skipWhitespace();
-				matchCharacter('"');
-				do {
-					index = indexOfAny(input, `\"`, index);
-					if (index == -1) {
-						throw new ParseException("Invalid input, unterminated string");
-					}
-
-					if (input[index] == '"') {
-						break; /* Unescaped closing " */
-					} else {
-						index += 2; /* Blindly skip next character after \ */
-					}
-				} while (1);
-
-				if (index > input.length) {
-					throw new ParseException("Invalid input, unterminated escape sequence in string");
-				}
-
-				string ret = input[0 .. index];
-				input = input[index .. $];
-				matchCharacter('"');
-
-				return ret;
-			}
-
-			/* Begin body of parse(string) */
+		string parseString() {
+			ptrdiff_t index = 0;
 			skipWhitespace();
-			matchCharacter('{');
-
+			matchCharacter('"');
 			do {
-				do {
-					skipWhitespace();
-				} while (munch(input, ",").length);
-				if (input[0] == '}') {
-					break;
+				index = indexOfAny(input, `\"`, index);
+				if (index == -1) {
+					throw new ParseException("Invalid input, unterminated string");
 				}
 
-				string name = parseString();
-				switch (name) {
-					mixin(JSONvar_parsecases!Specification);
-					default: throw new ParseException("Invalid field name: " ~ name);
+				if (input[index] == '"') {
+					break; /* Unescaped closing " */
+				} else {
+					index += 2; /* Blindly skip next character after \ */
 				}
 			} while (1);
 
-			mixin JSONvar_validate!Specification;
-			validate();
+			if (index > input.length) {
+				throw new ParseException("Invalid input, unterminated escape sequence in string");
+			}
+
+			string ret = input[0 .. index];
+			input = input[index .. $];
+			matchCharacter('"');
+
+			return ret;
 		}
+
+		/* Begin body of parse(string) */
+		skipWhitespace();
+		matchCharacter('{');
+
+		do {
+			/* Extension of RFC7159 JSON specs, accepts extraenous ','
+			 * property separators and ignores them */
+			/* Could be replaced with munch(input, whitespace ~ ",") */
+			do {
+				skipWhitespace();
+			} while (munch(input, ",").length);
+			if (input[0] == '}') {
+				break;
+			}
+
+			string name = parseString();
+			switch (name) {
+				mixin(JSONvar_parsecases!Specification);
+				default: throw new ParseException("Invalid field name: " ~ name);
+			}
+		} while (1);
+
+		mixin JSONvar_validate!Specification;
+		JSONvar_validate();
 	}
 }
 
