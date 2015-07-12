@@ -277,7 +277,7 @@ private:
 	/* Compile-time string for the switch statement to handle all the property
 	 * names. Requires a significant string mixin as regular mixins must be
 	 * complete declarations, i.e. inserting a single case statement is not
-	 * possible. Chains onto the _readvar template to minimize usage of the
+	 * possible. Chains onto the readvar template to minimize usage of the
 	 * utterly powerful string mixing */
 	enum string JSONvar_parsecases() = "";
 	enum string JSONvar_parsecases(string[] name, Type, JSONattributes attr, Tail...) =
@@ -296,7 +296,7 @@ private:
 	pure void JSONvar_validate(string[] name, Type : JSONnull, JSONattributes attr, Tail...)() {
 		static if (attr.required) {
 			if (mixin(name[1]) == JSONnull.BLANK) {
-				throw new ParseException("Mandatory field " ~ name[0] ~ " not given");
+				throw new ParseException("Mandatory property " ~ name[0] ~ " not given");
 			}
 		}
 
@@ -306,7 +306,7 @@ private:
 	pure void JSONvar_validate(string[] name, Type, JSONattributes attr, Tail...)() {
 		static if (attr.required && is(typeof(null) : Type)) {
 			if (mixin(name[1]) is null) {
-				throw new ParseException("Mandatory field " ~ name[0] ~ " not given");
+				throw new ParseException("Mandatory property " ~ name[0] ~ " not given");
 			}
 		}
 
@@ -327,7 +327,7 @@ private:
 			string name = JSONparseString(input);
 			switch (name) {
 				mixin(JSONvar_parsecases!Specification);
-				default: throw new ParseException("Invalid field name: " ~ name);
+				default: throw new ParseException("Invalid property name: " ~ name);
 			}
 
 			skipWhitespace();
@@ -338,8 +338,7 @@ private:
 		}
 		matchCharacter('}');
 
-		mixin JSONvar_validate!Specification;
-		JSONvar_validate();
+		JSONvar_validate!Specification();
 	}
 }
 
@@ -500,7 +499,7 @@ void JSONreadvar(Type)(ref string input, ref Type var) {
 	else static if (is(Type : string)) {
 		var = JSONparseString(input);
 	}
-	/* Handles statically-typed JSON arrays */
+	/* Handles statically-typed JSON arrays much the same as objects */
 	else static if (isArray!Type) {
 		mixin JSONstringUtilities;
 
@@ -647,7 +646,7 @@ pure string JSONparseString(ref string input) {
 			}
 		}
 
-		if (buf.length == 1) { // Decode dangling last hex character
+		if (buf.length == 1) { // Decode dangling last hex code unit
 			decodeBuffer();
 		} else if (buf.length == 2) {
 			assert(0);
