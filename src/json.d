@@ -14,12 +14,25 @@ immutable JSONattributes Required = JSONattributes(true);
 enum JSONnull : bool { BLANK, GIVEN };
 
 private:
-/* Basic sanitization to turn a string into a valid D identifier. Simply drops
- * all non-identifier-allowed characters, keeping [a-zA-Z_][0-9a-zA-Z_]* */
-pure string sanitize(string name) {
-	string ret = removechars(name, "^0-9a-zA-z_");
-	munch(ret, "0-9");
-	return ret;
+/* Basic sanitization to turn a string into a valid D identifier. Replaces all
+ * non-identifier-allowed characters with _, including a leading digit. Length
+ * of the input and output strings are equal in code points. */
+pure string sanitize(string name)
+out(ret) {
+	assert(std.utf.count(ret) == std.utf.count(name));
+} body {
+	if (name.length > 0 && name[0] >= '0' && name[0] <= '9') {
+		return "_" ~ tr(name[1 .. $], "0-9a-zA-Z_", "_", "c").idup;
+	} else {
+		return tr(name, "0-9a-zA-Z_", "_", "c").idup;
+	}
+}
+
+unittest {
+	assert(sanitize("") == "");
+	assert(sanitize("_1_Valid_IDENTIFIER") == "_1_Valid_IDENTIFIER");
+	assert(sanitize("a-Few@0~BAD!eggs") == "a_Few_0_BAD_eggs");
+	assert(sanitize("000_Möŕè") == "_00_M___");
 }
 
 class ParseException : Exception {
@@ -188,7 +201,6 @@ unittest {
 }
 
 unittest {
-	/* All these specs are invalid */
 	mixin(createSpecGroup!("F", 23));
 	alias SpecF1 = Tuple!(3);
 	alias SpecF2 = Tuple!([]);
@@ -526,7 +538,7 @@ void JSONreadvar(Type)(ref string input, ref Type var) {
 	else static if (isJSONobject!Type) {
 		var.JSONparser(input);
 	} else {
-		static assert(0, "Field parsing of type " ~ Type.stringof ~ " not implemented");
+		static assert(0, "Property parsing of type " ~ Type.stringof ~ " not implemented");
 	}
 }
 
@@ -589,7 +601,7 @@ pure string JSONparseString(ref string input) {
 	 *
 	 * Strategy: decode consecutive \uXXXX into width-2 wchar buffer. Whenever
 	 * buffer fills or no more \uXXXX in sequence, decode first codepoint
-	 * destructively from buffer to output (as UTF8)
+	 * destructively from buffer to output (as UTF-8)
 	 */
 	void handleHexEscapes() {
 		wstring buf;
@@ -646,7 +658,7 @@ pure string JSONparseString(ref string input) {
 			}
 		}
 
-		if (buf.length == 1) { // Decode dangling last hex code unit
+		if (buf.length == 1) { // Decode dangling last UTF-16 codeunit
 			decodeBuffer();
 		} else if (buf.length == 2) {
 			assert(0);
@@ -664,9 +676,7 @@ pure string JSONparseString(ref string input) {
 			throw new ParseException("Invalid input, unterminated string");
 		} else if (input[index] >= 0x00 && input[index] <= 0x1F) {
 			throw new ParseException(format("Invalid input, naked 00-1F control code in string at: %s", input[index .. $]));
-		}
-
-		if (input[index] == '"') {
+		} else if (input[index] == '"') {
 			break; // Unescaped closing "
 		} else {
 			ret ~= input[0 .. index]; // Copy up to escape sequence
