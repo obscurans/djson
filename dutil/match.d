@@ -722,7 +722,7 @@ unittest {
 	}
 
 	debug(1) {
-		writeln("match.d: State single/multiple-transition storage test passed");
+		writeln("dutil.match: State single/multiple-transition storage test passed");
 	}
 }
 
@@ -755,7 +755,7 @@ unittest {
 	assert(!expected.length);
 
 	debug(1) {
-		writeln("match.d: DFA string matching test passed");
+		writeln("dutil.match: DFA string matching test passed");
 	}
 }
 
@@ -800,7 +800,7 @@ unittest {
 	assert(!expected.length);
 
 	debug(1) {
-		writeln("match.d: NFA string matching test passed");
+		writeln("dutil.match: NFA string matching test passed");
 	}
 }
 

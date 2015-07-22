@@ -29,11 +29,21 @@ out(ret) {
 	}
 }
 
+version(unittest) {
+	debug(1) {
+		import std.stdio;
+	}
+}
+
 unittest {
 	assert(sanitize("") == "");
 	assert(sanitize("_1_Valid_IDENTIFIER") == "_1_Valid_IDENTIFIER");
 	assert(sanitize("a-Few@0~BAD!eggs") == "a_Few_0_BAD_eggs");
 	assert(sanitize("000_Möŕè") == "_00_M___");
+
+	debug(1) {
+		writeln("dutil.json: Name sanitization test passed");
+	}
 }
 
 class ParseException : Exception {
@@ -161,6 +171,10 @@ unittest {
 			static assert(mixin("is(JSONobject!" ~ S1 ~ " == JSONobject!" ~ S2 ~ ")"));
 		}
 	}
+
+	debug(1) {
+		writeln("dutil.json: JSON spec validation test A passed");
+	}
 }
 
 unittest {
@@ -189,6 +203,10 @@ unittest {
 			static assert(mixin("is(JSONobject!" ~ S1 ~ " == JSONobject!" ~ S2 ~ ")"));
 		}
 	}
+
+	debug(1) {
+		writeln("dutil.json: JSON spec validation test B passed");
+	}
 }
 
 unittest {
@@ -198,6 +216,10 @@ unittest {
 	foreach (S; SpecGroupI) {
 		/* All of these specs are valid */
 		static assert(__traits(compiles, mixin("JSONobject!" ~ S)));
+	}
+
+	debug(1) {
+		writeln("dutil.json: JSON spec validation test I passed");
 	}
 }
 
@@ -230,6 +252,10 @@ unittest {
 	foreach (S; SpecGroupF) {
 		/* All of these specs are invalid */
 		static assert(!__traits(compiles, mixin("JSONobject!" ~ S)));
+	}
+
+	debug(1) {
+		writeln("dutil.json: JSON spec validation test F passed");
 	}
 }
 
@@ -469,6 +495,10 @@ unittest {
 		}
 		/* Remaining control codes are converted correctly to hex escapes */
 		assert(JSONescapeString(" " ~ cast(char)c ~ " ") == format(` \u%04X `, c));
+	}
+
+	debug(1) {
+		writeln("dutil.json: JSON string encoding test passed");
 	}
 }
 
@@ -740,6 +770,10 @@ unittest {
 
 	input = `"\f\uD801"`;
 	assertThrown!ParseException(JSONparseString(input));
+
+	debug(1) {
+		writeln("dutil.json: JSON string decoding test passed");
+	}
 }
 
 /* General parsing/writing unittest */
@@ -804,5 +838,9 @@ unittest {
 	assert(x.String.toString() == `{"single":"test","array":["foo","bar","baz"]}`);
 
 	assertThrown!ParseException(TestNested(`{`));
+
+	debug(1) {
+		writeln("dutil.json: JSON general parsing test passed");
+	}
 }
 
