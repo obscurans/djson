@@ -53,8 +53,10 @@ class UnionFind(T) {
 	UnionFind!T find() {
 		if (parent !is null) {
 			parent = parent.find(); /* Path compression */
+			return parent;
+		} else {
+			return this;
 		}
-		return parent;
 	}
 
 	UnionFind!T unionSet(UnionFind!T other) {
@@ -111,9 +113,10 @@ struct UnionFindStatic {
 
 	size_t find(size_t index) {
 		if (set_info[index] >= 0) {
-			set_info[index] = find(set_info[index]); /* Path compression */
+			return set_info[index] = find(set_info[index]); /* Path compression */
+		} else {
+			return index;
 		}
-		return index;
 	}
 
 	size_t unionSet(size_t first, size_t second) {
@@ -136,10 +139,14 @@ struct UnionFindStatic {
 		} else if (first_rank < second_rank) {
 			set_info[second_root] = first_root;
 			return first_root;
-		} else {
-			set_info[second_root] = first_root; /* Arbitrary choice at equal rank */
-			set_info[first_root]-- /* Increase rank by 1 */
+		} else if (first_root < second_root) { /* Choose lower index at equal rank */
+			set_info[second_root] = first_root;
+			set_info[first_root]--; /* Increase rank by 1 */
 			return first_root;
+		} else {
+			set_info[first_root] = second_root;
+			set_info[second_root]--;
+			return second_root;
 		}
 	}
 
@@ -147,5 +154,50 @@ private:
 	/* Array storage for each set. If positive, points to the index of its
 	 * parent. If negative, is the root of a tree, rank is two's complemented */
 	ptrdiff_t[] set_info;
+
+	this(this) { /* Postblit, copy set_info */
+		set_info = set_info.dup;
+	}
+}
+
+version(unittest) {
+	debug(1) {
+		import std.stdio;
+	}
+}
+
+unittest {
+	UnionFind!int[] o = UnionFind!int.makeList([1, 2, 3, 4, 5]);
+
+	assert(o[3].find() is o[3]);
+	assert(o[3].unionSet(o[4]) is o[3]);
+	assert(o[4].find() is o[3]);
+	assert(o[1].unionSet(o[0]) is o[1]);
+	assert(o[4].unionSet(o[0]) is o[3]);
+	o ~= new UnionFind!int(6);
+	o ~= new UnionFind!int();
+	assert(o[6].find() is o[6]);
+	assert(o[6].unionSet(o[3]) is o[3]);
+
+	debug(1) {
+		writeln("dutil.unionfind: UnionFind test passed");
+	}
+}
+
+unittest {
+	UnionFindStatic o = UnionFindStatic(5);
+
+	assert(o.find(3) == 3);
+	assert(o.unionSet(3, 4) == 3);
+	assert(o.find(4) == 3);
+	assert(o.unionSet(1, 0) == 0);
+	assert(o.unionSet(4, 1) == 0);
+	o.makeSet(3);
+	assert(o.find(7) == 7);
+	assert(o.unionSet(6, 3) == 0);
+
+	debug(1) {
+		writeln("dutil.unionfind: UnionFindStatic test passed");
+	}
 }
 
