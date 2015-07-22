@@ -1,4 +1,5 @@
 /** Copyright (C) 2015 Jeffrey Tsang. All rights reserved. See /LICENCE.md */
+module dutil.match;
 
 import std.conv, std.range, std.traits, std.functional;
 

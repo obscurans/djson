@@ -1,4 +1,5 @@
 /** Copyright (C) 2015 Jeffrey Tsang. All rights reserved. See /LICENCE.md */
+module dutil.json;
 
 import std.string, std.utf, std.format, std.conv, std.math, std.traits, std.exception;
 
