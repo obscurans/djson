@@ -11,6 +11,7 @@ import std.range, std.traits;
  * *this(T): construct singleton set with opaque, unused payload
  * static makeList(size_t): construct number of singletons with no payload
  * *static makeList(InputRange!T): convenience function to construct list of singletons
+ * isRoot(): whether this is the root of a set
  * find(): returns the root of this set
  * unionSet(UnionFind!T): joins this set with other set and returns new root
  *
@@ -62,6 +63,10 @@ class UnionFind(T) {
 			}
 			return ret;
 		}
+	}
+
+	pure bool isRoot() const {
+		return parent is null;
 	}
 
 	UnionFind!T find() {
@@ -141,6 +146,7 @@ class UnionFind(T) {
  * makeSet(): append one singleton set
  * makeSet(size_t): append this number of singleton sets
  * @property length: number of sets
+ * isRoot(size_t): is this index a root of a set
  * find(size_t): find root of set with this index
  * unionSet(size_t, size_t): join two sets with these indices, returns new root
  *
@@ -168,6 +174,10 @@ struct UnionFindStatic {
 
 	@property pure size_t length() const {
 		return length;
+	}
+
+	pure bool isRoot(size_t index) const {
+		return set_info[index] < 0;
 	}
 
 	size_t find(size_t index) {
@@ -260,6 +270,8 @@ unittest {
 	o ~= new UnionFind!int();
 	assert(o[6].find() is o[6]);
 	assert(o[6].unionSet(o[3]) is o[1]); /* 1<-0,3,4,6 */
+	assert(!o[6].isRoot());
+	assert(o[1].isRoot());
 
 	debug(1) {
 		writeln("dutil.unionfind: UnionFind basic functionality test passed");
@@ -277,6 +289,8 @@ unittest {
 	o.makeSet(3);
 	assert(o.find(7) == 7);
 	assert(o.unionSet(6, 3) == 0); /* 0<-1,3,4,6 */
+	assert(!o.isRoot(6));
+	assert(o.isRoot(0));
 
 	debug(1) {
 		writeln("dutil.unionfind: UnionFindStatic basic functionality test passed");
@@ -289,15 +303,15 @@ unittest {
 
 	UnionFind!int[] eqs = UnionFind!int.equivalencePartition(array, (int x, int y) => (x - y) % 5 == 0);
 	assert(eqs[0].payload == 3);
-	assert(eqs[0].parent is null);
+	assert(eqs[0].isRoot());
 	assert(eqs[1].parent is eqs[0]);
 	assert(eqs[2].payload == 5);
-	assert(eqs[2].parent is null);
+	assert(eqs[2].isRoot());
 	assert(eqs[3].parent is eqs[2]);
 	assert(eqs[4].parent is eqs[0]);
 	assert(eqs[5].parent is eqs[0]);
 	assert(eqs[6].payload == 11);
-	assert(eqs[6].parent is null);
+	assert(eqs[6].isRoot());
 	assert(eqs[7].parent is eqs[6]);
 
 	UnionFindStatic eqs2 = UnionFindStatic.equivalencePartition(array.length, (size_t x, size_t y) => (array[x] - array[y]) % 5 == 0);
