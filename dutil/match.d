@@ -358,7 +358,7 @@ private:
 				debug (2) {
 					import std.stdio;
 					write(ptr, skip, "+", letter);
-					scope(exit) writeln("->", ptr, skip);
+					scope(exit) writeln("=>", ptr, skip);
 				}
 
 				State next = ptr.getTransition(letter);
@@ -459,7 +459,7 @@ private:
 					fail_transition = test;
 					break;
 				} else {
-					ancestor = ancestor.parent;
+					ancestor = ancestor.fail_transition;
 				}
 			}
 			if (ancestor is root) {
@@ -525,7 +525,7 @@ private:
 				write(Printing.in_dictionary);
 			}
 			debug(1) {
-				write("->", fail_transition);
+				write("=>", fail_transition);
 				static if (skip_allowed) {
 					write("=>", eps_transition);
 				}
