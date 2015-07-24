@@ -1,7 +1,7 @@
 /** Copyright (C) 2015 Jeffrey Tsang. All rights reserved. See /LICENCE.md */
 module dutil.match;
 
-import std.conv, std.range, std.traits, std.functional;
+import std.conv, std.range, std.typecons, std.traits, std.functional;
 
 alias ubstring = immutable(ubyte)[];
 
@@ -134,14 +134,14 @@ if (isValidPrintLetter!print_letter) {
 	 * If callback returns a boolean-true value, matching instantly terminates.
 	 * Callback returning void is fine (no early termination).
 	 */
-	void matchInput(FPtr)(ubstring input, FPtr callback)
+	void matchInput(FPtr)(ubstring input, FPtr callback) const
 	if (isCallable!FPtr && is(typeof(callback(Match()))))
 	in {
 		assert(!dictionary_changed);
 	} body {
 		size_t index = 0;
 		bool[Thread] pool; /* List of active Threads */
-		Thread init = Thread(root, []);
+		Thread init = Thread(rebindable(root), []);
 		do {
 			pool[init] = true; /* Initialize Threads starting at root */
 		} while (State.skipMatcher(init));
@@ -199,7 +199,7 @@ if (isValidPrintLetter!print_letter) {
 		}
 	}
 
-	Match computeMatch(Thread thread, size_t index)
+	pure Match computeMatch(Thread thread, size_t index) const
 	in {
 		assert(thread.ptr !is null && thread.ptr.dictionary_id != 0);
 	} out(ret) {
@@ -235,7 +235,7 @@ if (isValidPrintLetter!print_letter) {
 
 private:
 	struct Thread {
-		State ptr;
+		Rebindable!(const(State)) ptr; /* Current std.typecons hack to get mutable ref to const object */
 		ubyte[] skip;
 	}
 
@@ -404,7 +404,7 @@ private:
 			}
 		}
 
-		pure State getSkipTransition() {
+		pure State getSkipTransition() const {
 			static if (skip_allowed) {
 				return getTransition(num_letter - 1); /* top letter hardcoded as skippable right now */
 			} else {
@@ -418,7 +418,7 @@ private:
 		static bool epsSkipMatcher(ref Thread thread) {
 			static if (skip_allowed) {
 				with (thread) {
-					State next = ptr.eps_transition;
+					const State next = ptr.eps_transition;
 					if (next is null) {
 						return false;
 					}
@@ -541,7 +541,7 @@ private:
 		}
 
 		/* Retrieves the State target, if any, on transition on this letter. */
-		State getTransition(ubyte letter)
+		const(State) getTransition(ubyte letter) const
 		in {
 			assert(letter < num_letter);
 		} body {
