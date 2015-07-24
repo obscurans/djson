@@ -168,7 +168,7 @@ if (isValidPrintLetter!print_letter) {
 								pool_next[subthread] = true;
 
 								if (subthread.ptr.dictionary_id != 0) {
-									Match match = computeMatch(thread, index);
+									Match match = computeMatch(subthread, index);
 									/* Mark new Matches, as indirect matches can equal a separate Thread's direct match */
 									if (match !in pool_match) {
 										static if (is(typeof(callback(match)) : bool)) {
