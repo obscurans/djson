@@ -3,22 +3,32 @@ module dutil.bittwiddle;
 
 /* Test is a power of 2 (one bit set). Returns true for 0 */
 bool isPow2z(T)(T num) {
-	return (num & (num - 1)) == 0;
+	return unsetLsb(num) == 0;
 }
 
 /* Test is a power of 2 (one bit set) */
 bool isPow2(T)(T num) {
-	return num && !(num & (num - 1));
+	return num && !unsetLsb(num);
+}
+
+/* Return least significant bit alone. Returns 0 for 0 */
+T lsb(T)(T num) {
+	return num & -num;
 }
 
 /* Find rank of least significant bit. Returns 0 for 0 */
-byte lsb(T)(T num) {
+byte log2lsb(T)(T num) {
 	byte ret = 0;
-	num = num & -num; /* Isolate last bit */
+	num = lsb(num);
 	foreach (i, mask; HighMask!T) {
 		ret |= ((num & mask) != 0) << i;
 	}
 	return ret;
+}
+
+/* Clears the least significant bit, if any */
+T unsetLsb(T)(T num) {
+	return num & (num - 1);
 }
 
 /* Round down to 1 less than a power of 2 */
