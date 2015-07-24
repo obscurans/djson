@@ -25,18 +25,18 @@ if (isCallable!FPtr && is(typeof(oracle(cast(size_t)0, cast(size_t)0)) : bool)) 
 	currentMaximal[] = -1;
 	currentMaximal[0] = -2;
 
-	foreach (i; 1 .. count) {
+L:	foreach (i; 1 .. count) {
 		if (oracle(i, firstMaximal)) {
 			continue; /* Strictly less than a maximal element */
 		}
 
-		if (oracle(firstMaximal, i)) {
+		while (oracle(firstMaximal, i)) {
 			if (currentMaximal[firstMaximal] == -2) {
 				/* Change unique maximal element */
 				currentMaximal[firstMaximal] = -1;
 				firstMaximal = i;
 				currentMaximal[i] = -2;
-				continue;
+				continue L;
 			} else {
 				/* Delete this proven non-maximal element */
 				size_t next = currentMaximal[firstMaximal];
