@@ -399,6 +399,7 @@ private:
 				}
 
 				ptr = next;
+				skip = skip.dup;
 				skip ~= cast(ubyte)(ptr.depth - 1);
 				return true;
 			}
@@ -424,6 +425,7 @@ private:
 					}
 
 					assert(next.depth < ptr.depth);
+					skip = skip.dup;
 					shiftSkip(skip, cast(ubyte)(ptr.depth - next.depth));
 					ptr = next;
 					return true;
