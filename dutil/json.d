@@ -18,7 +18,7 @@ enum JSONnull : bool { BLANK, GIVEN };
 /* Completely generic templated struct (with the names and types of properties
  * given as parameters) which automagically generates members/parser/printer
  * functionality. */
-struct JSONstructImpl(Specification...) {
+static struct JSONstructImpl(Specification...) {
 	static assert(is(this == JSONstructImpl!(validateJSONspec!Specification)), "Invalid JSON specification");
 
 	mixin JSONvar_decl!Specification;
@@ -29,13 +29,13 @@ struct JSONstructImpl(Specification...) {
 		return "{" ~ JSONprinter() ~ "}";
 	}
 
-	this(string input) {
+	this(string input) pure {
 		JSONparser(input);
 	}
 }
 
 /* Version using class type instead of struct; otherwise identical code */
-class JSONclassImpl(Specification...) {
+static class JSONclassImpl(Specification...) {
 	static assert(is(this == JSONclassImpl!(validateJSONspec!Specification)), "Invalid JSON specification");
 
 	mixin JSONvar_decl!Specification;
@@ -46,9 +46,9 @@ class JSONclassImpl(Specification...) {
 		return "{" ~ JSONprinter() ~ "}";
 	}
 
-	this() {} /* Restore default constructor */
+	this() pure {} /* Restore default constructor */
 
-	this(string input) {
+	this(string input) pure {
 		JSONparser(input);
 	}
 }
@@ -310,7 +310,8 @@ unittest {
 mixin template JSONvar_decl() {}
 
 mixin template JSONvar_decl(string[] name, Type, JSONattributes attr, Tail...) {
-	mixin(Unqual!Type.stringof ~ " " ~ name[1] ~ ";");
+	alias TYPE = Type; /* Force string mixin to resolve Type properly */
+	mixin("TYPE " ~ name[1] ~ ";");
 	mixin JSONvar_decl!Tail;
 }
 
@@ -531,7 +532,7 @@ unittest {
 }
 
 /* Template function used for parsing properties, by type. */
-void JSONreadvar(Type)(ref string input, ref Type var) {
+pure void JSONreadvar(Type)(ref string input, ref Type var) {
 	/* A null property requires the exact token "null" */
 	static if (is(Type : JSONnull)) {
 		if (input[0 .. 4] == "null") {
@@ -821,6 +822,10 @@ unittest {
 		"array", bool[])
 		TestBoolean;
 
+	static class TestBoolean2 : TestBoolean {
+		bool extra;
+	}
+
 	alias JSONstruct!(
 		"single", int,
 		"array", int[])
@@ -831,6 +836,10 @@ unittest {
 		"array", double[])
 		TestReal;
 
+	static class TestReal2 : TestReal {
+		double extra;
+	}
+
 	alias JSONstruct!(
 		"single", string,
 		"array", string[])
@@ -839,9 +848,9 @@ unittest {
 	alias JSONclass!(
 		"Array", TestBoolean[],
 		"String", TestString,
-		"Real", TestReal,
+		"Real", TestReal2,
 		"Integral", TestIntegral,
-		"Boolean", TestBoolean,
+		"Boolean", TestBoolean2,
 		"Null", TestNull)
 		TestNested;
 
