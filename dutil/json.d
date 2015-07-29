@@ -386,7 +386,7 @@ pure void JSONvar_validate(string[] name, Type, JSONattributes attr, Tail...)() 
  * fills in the properties of the JSON object. Destructively modifies the input
  * string, stripping off the part read. */
 pure void JSONparser(Specification...)(ref string input) {
-	mixin JSONstringUtilities;
+	mixin JSONstringUtilities!input;
 
 	skipWhitespace();
 	matchCharacter('{');
@@ -411,7 +411,7 @@ pure void JSONparser(Specification...)(ref string input) {
 }
 
 /* Various simple string-parsing utility functions and shorthands */
-mixin template JSONstringUtilities() {
+mixin template JSONstringUtilities(alias input) {
 	void skipWhitespace() {
 		munch(input, " \t\r\n");
 	}
@@ -573,7 +573,7 @@ pure void JSONreadvar(Type)(ref string input, ref Type var) {
 	}
 	/* Handles statically-typed JSON arrays much the same as objects */
 	else static if (isArray!Type) {
-		mixin JSONstringUtilities;
+		mixin JSONstringUtilities!input;
 
 		skipWhitespace();
 		matchCharacter('[');
@@ -654,7 +654,7 @@ pure string parseNumber(ref string input) {
 /* Main JSON string parsing function. Handles all escape sequences and decodes
  * them. Destructive read on the input string to match other uses. */
 pure string JSONparseString(ref string input) {
-	mixin JSONstringUtilities;
+	mixin JSONstringUtilities!input;
 
 	ptrdiff_t index = 0;
 	string ret = "";
