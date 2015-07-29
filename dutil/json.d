@@ -1,9 +1,10 @@
 /** Copyright (C) 2015 Jeffrey Tsang. All rights reserved. See /LICENCE.md */
 module dutil.json;
 
-import std.string, std.utf, std.format, std.conv, std.math, std.traits, std.exception;
+import std.string, std.utf, std.format, std.conv, std.math, std.traits, std.typetuple, std.exception;
 
-alias JSONobject(Specification...) = JSONobjectImpl!(validateJSONspec!Specification);
+alias JSONstruct(Specification...) = JSONstructImpl!(validateJSONspec!Specification);
+alias JSONclass(Specification...) = JSONclassImpl!(validateJSONspec!Specification);
 
 struct JSONattributes {
 	bool required = false;
@@ -14,7 +15,44 @@ immutable JSONattributes Required = JSONattributes(true);
 
 enum JSONnull : bool { BLANK, GIVEN };
 
-private:
+/* Completely generic templated struct (with the names and types of properties
+ * given as parameters) which automagically generates members/parser/printer
+ * functionality. */
+struct JSONstructImpl(Specification...) {
+	static assert(is(this == JSONstructImpl!(validateJSONspec!Specification)), "Invalid JSON specification");
+
+	mixin JSONvar_decl!Specification;
+	mixin JSONprinter!Specification;
+	mixin JSONparser!Specification;
+
+	string toString() const {
+		return "{" ~ JSONprinter() ~ "}";
+	}
+
+	this(string input) {
+		JSONparser(input);
+	}
+}
+
+/* Version using class type instead of struct; otherwise identical code */
+class JSONclassImpl(Specification...) {
+	static assert(is(this == JSONclassImpl!(validateJSONspec!Specification)), "Invalid JSON specification");
+
+	mixin JSONvar_decl!Specification;
+	mixin JSONprinter!Specification;
+	mixin JSONparser!Specification;
+
+	override string toString() const {
+		return "{" ~ JSONprinter() ~ "}";
+	}
+
+	this() {} /* Restore default constructor */
+
+	this(string input) {
+		JSONparser(input);
+	}
+}
+
 /* Basic sanitization to turn a string into a valid D identifier. Replaces all
  * non-identifier-allowed characters with _, including a leading digit. Length
  * of the input and output strings are equal in code points. */
@@ -52,10 +90,12 @@ class ParseException : Exception {
 	}
 }
 
-/* Duck typing test for whether this is a JSON object. Relevant function is the
- * existence of a parser method to fill it in */
-enum bool isJSONobject(T) = (hasMember!(T, "JSONparser") && is(typeof({T x; string y; x.JSONparser(y);}())));
+enum bool isJSONstruct(T) = isInstanceOf!(JSONstructImpl, T);
+private enum bool isInstanceOfJSONclassImpl(T) = isInstanceOf!(JSONclassImpl, T);
+enum bool isJSONclass(T) = isInstanceOf!(JSONclassImpl, T) ||
+	anySatisfy!(isInstanceOfJSONclassImpl, BaseClassesTuple!T);
 
+private:
 /* Helper to enumerate all control codes from 00 to 1F */
 immutable string ControlCodes(int x : 0) = "\x00";
 immutable string ControlCodes(int x) = ControlCodes!(x - 1) ~ cast(char)x;
@@ -162,13 +202,15 @@ unittest {
 	/* foreach over a tuple is compile-time unrolled to automate test farming */
 	foreach (S; SpecGroupA) {
 		/* All of these specs are valid */
-		static assert(__traits(compiles, mixin("JSONobject!" ~ S)));
+		static assert(__traits(compiles, mixin("JSONstruct!" ~ S)));
+		static assert(__traits(compiles, mixin("JSONclass!" ~ S)));
 	}
 
 	foreach (S1; SpecGroupA) {
 		foreach (S2; SpecGroupA) {
 			/* All of these specs are equivalent to each other */
-			static assert(mixin("is(JSONobject!" ~ S1 ~ " == JSONobject!" ~ S2 ~ ")"));
+			static assert(mixin("is(JSONstruct!" ~ S1 ~ " == JSONstruct!" ~ S2 ~ ")"));
+			static assert(mixin("is(JSONclass!" ~ S1 ~ " == JSONclass!" ~ S2 ~ ")"));
 		}
 	}
 
@@ -194,13 +236,15 @@ unittest {
 
 	foreach (S; SpecGroupB) {
 		/* All of these specs are valid */
-		static assert(__traits(compiles, mixin("JSONobject!" ~ S)));
+		static assert(__traits(compiles, mixin("JSONstruct!" ~ S)));
+		static assert(__traits(compiles, mixin("JSONclass!" ~ S)));
 	}
 
 	foreach (S1; SpecGroupB) {
 		foreach (S2; SpecGroupB) {
 			/* All of these specs are equivalent to each other */
-			static assert(mixin("is(JSONobject!" ~ S1 ~ " == JSONobject!" ~ S2 ~ ")"));
+			static assert(mixin("is(JSONstruct!" ~ S1 ~ " == JSONstruct!" ~ S2 ~ ")"));
+			static assert(mixin("is(JSONclass!" ~ S1 ~ " == JSONclass!" ~ S2 ~ ")"));
 		}
 	}
 
@@ -215,7 +259,8 @@ unittest {
 
 	foreach (S; SpecGroupI) {
 		/* All of these specs are valid */
-		static assert(__traits(compiles, mixin("JSONobject!" ~ S)));
+		static assert(__traits(compiles, mixin("JSONstruct!" ~ S)));
+		static assert(__traits(compiles, mixin("JSONclass!" ~ S)));
 	}
 
 	debug(1) {
@@ -251,7 +296,8 @@ unittest {
 
 	foreach (S; SpecGroupF) {
 		/* All of these specs are invalid */
-		static assert(!__traits(compiles, mixin("JSONobject!" ~ S)));
+		static assert(!__traits(compiles, mixin("JSONstruct!" ~ S)));
+		static assert(!__traits(compiles, mixin("JSONclass!" ~ S)));
 	}
 
 	debug(1) {
@@ -259,126 +305,108 @@ unittest {
 	}
 }
 
-/* Completely generic templated struct (with the names and types of properties
- * given as parameters) which automagically generates members/parser/printer
- * functionality. */
-struct JSONobjectImpl(Specification...) {
+/* Creates valid D code that declares all the variables listed in the JSON
+ * specification. */
+mixin template JSONvar_decl() {}
 
-	static assert(is(this == JSONobjectImpl!(validateJSONspec!Specification)), "Invalid JSON specification");
+mixin template JSONvar_decl(string[] name, Type, JSONattributes attr, Tail...) {
+	mixin(Unqual!Type.stringof ~ " " ~ name[1] ~ ";");
+	mixin JSONvar_decl!Tail;
+}
 
-	mixin JSONvar_decl!Specification;
+/* Recursive mixin templates to compile-time construct the JSON-format pretty
+ * printer function */
+string JSONprinter()() const {
+	return "";
+}
 
-	string toString() const {
-		return "{" ~ JSONprinter!Specification() ~ "}";
+string JSONprinter(string[] name, Type, JSONattributes attr, Tail...)() const {
+	string ret = "";
+
+	void printvar() {
+		ret = `"` ~ name[0] ~ `":` ~ JSONprintvar(mixin(name[1]));
 	}
 
-	this(string input) {
-		JSONparser(input);
-	}
-
-private:
-	/* Creates valid D code that declares all the variables listed in the JSON
-	 * specification. */
-	mixin template JSONvar_decl() {}
-
-	mixin template JSONvar_decl(string[] name, Type, JSONattributes attr, Tail...) {
-		mixin(Unqual!Type.stringof ~ " " ~ name[1] ~ ";");
-		mixin JSONvar_decl!Tail;
-	}
-
-	/* Recursive templates to compile-time construct the JSON-format pretty
-	 * printer function */
-	string JSONprinter()() const {
-		return "";
-	}
-
-	string JSONprinter(string[] name, Type, JSONattributes attr, Tail...)() const {
-		string ret = "";
-
-		void printvar() {
-			ret = `"` ~ name[0] ~ `":` ~ JSONprintvar(mixin(name[1]));
-		}
-
-		/* Expression tests if null can be implicitly converted to Type, in
-		 * which case an explicit null value can be stored for field "name" */
-		static if (!attr.required && is(typeof(null) : Type)) {
-			if (mixin(name[1]) !is null) {
-				printvar();
-			}
-		} else {
+	/* Expression tests if null can be implicitly converted to Type, in
+	 * which case an explicit null value can be stored for field "name" */
+	static if (!attr.required && is(typeof(null) : Type)) {
+		if (mixin(name[1]) !is null) {
 			printvar();
 		}
-
-		string tail = JSONprinter!Tail();
-		return ret ~ (ret.length && tail.length ? "," : "") ~ tail;
+	} else {
+		printvar();
 	}
 
-	/* Compile-time string for the switch statement to handle all the property
-	 * names. Requires a significant string mixin as regular mixins must be
-	 * complete declarations, i.e. inserting a single case statement is not
-	 * possible. Chains onto the readvar template to minimize usage of the
-	 * utterly powerful string mixing */
-	enum string JSONvar_parsecases() = "";
-	enum string JSONvar_parsecases(string[] name, Type, JSONattributes attr, Tail...) =
-		`case "` ~ name[0] ~ `":` ~
-			"skipWhitespace();" ~
-			"matchCharacter(':');" ~
-			"skipWhitespace();" ~
-			"JSONreadvar(input, " ~ name[1] ~ ");" ~
-			"break;" ~
-			JSONvar_parsecases!Tail;
+	mixin .JSONprinter!Tail tailp;
+	string tail = tailp.JSONprinter();
+	return ret ~ (ret.length && tail.length ? "," : "") ~ tail;
+}
 
-	/* Recursive templates to validate the read-in JSON object. Currently just
-	 * checks whether non-optional properties that could be null are not null */
-	pure void JSONvar_validate()() {}
+/* Compile-time string for the switch statement to handle all the property
+ * names. Requires a significant string mixin as regular mixins must be complete
+ * declarations, i.e. inserting a single case statement is not possible. Chains
+ * onto the readvar template to minimize usage of the utterly powerful string
+ * mixing */
+enum string JSONvar_parsecases() = "";
+enum string JSONvar_parsecases(string[] name, Type, JSONattributes attr, Tail...) =
+	`case "` ~ name[0] ~ `":` ~
+		"skipWhitespace();" ~
+		"matchCharacter(':');" ~
+		"skipWhitespace();" ~
+		"JSONreadvar(input, " ~ name[1] ~ ");" ~
+		"break;" ~
+		JSONvar_parsecases!Tail;
 
-	pure void JSONvar_validate(string[] name, Type : JSONnull, JSONattributes attr, Tail...)() {
-		static if (attr.required) {
-			if (mixin(name[1]) == JSONnull.BLANK) {
-				throw new ParseException("Mandatory property " ~ name[0] ~ " not given");
-			}
+/* Recursive templates to validate the read-in JSON object. Currently just
+ * checks whether non-optional properties that could be null are not null */
+pure void JSONvar_validate()() {}
+
+pure void JSONvar_validate(string[] name, Type : JSONnull, JSONattributes attr, Tail...)() {
+	static if (attr.required) {
+		if (mixin(name[1]) == JSONnull.BLANK) {
+			throw new ParseException("Mandatory property " ~ name[0] ~ " not given");
 		}
-
-		JSONvar_validate!Tail();
 	}
 
-	pure void JSONvar_validate(string[] name, Type, JSONattributes attr, Tail...)() {
-		static if (attr.required && is(typeof(null) : Type)) {
-			if (mixin(name[1]) is null) {
-				throw new ParseException("Mandatory property " ~ name[0] ~ " not given");
-			}
+	JSONvar_validate!Tail();
+}
+
+pure void JSONvar_validate(string[] name, Type, JSONattributes attr, Tail...)() {
+	static if (attr.required && is(typeof(null) : Type)) {
+		if (mixin(name[1]) is null) {
+			throw new ParseException("Mandatory property " ~ name[0] ~ " not given");
 		}
-
-		JSONvar_validate!Tail();
 	}
 
-	/* Compile-time construction of the parser, which takes an input string and
-	 * fills in the properties of the JSON object. Destructively modifies the
-	 * input string, stripping off the part read. */
-	pure void JSONparser(ref string input) {
-		mixin JSONstringUtilities;
+	JSONvar_validate!Tail();
+}
+
+/* Compile-time construction of the parser, which takes an input string and
+ * fills in the properties of the JSON object. Destructively modifies the input
+ * string, stripping off the part read. */
+pure void JSONparser(Specification...)(ref string input) {
+	mixin JSONstringUtilities;
+
+	skipWhitespace();
+	matchCharacter('{');
+	matchOptionalSeparator();
+
+	while (!testCharacter('}')) {
+		string name = JSONparseString(input);
+		switch (name) {
+			mixin(JSONvar_parsecases!Specification);
+			default: throw new ParseException("Invalid property name: " ~ name);
+		}
 
 		skipWhitespace();
-		matchCharacter('{');
-		matchOptionalSeparator();
-
-		while (!testCharacter('}')) {
-			string name = JSONparseString(input);
-			switch (name) {
-				mixin(JSONvar_parsecases!Specification);
-				default: throw new ParseException("Invalid property name: " ~ name);
-			}
-
-			skipWhitespace();
-			if (testCharacter('}')) {
-				break;
-			}
-			matchSeparator();
+		if (testCharacter('}')) {
+			break;
 		}
-		matchCharacter('}');
-
-		JSONvar_validate!Specification();
+		matchSeparator();
 	}
+	matchCharacter('}');
+
+	JSONvar_validate!Specification();
 }
 
 /* Various simple string-parsing utility functions and shorthands */
@@ -450,7 +478,7 @@ string JSONprintvar(Type)(const Type var) {
 		return ret ~ "]";
 	}
 	/* Base case: directly use toString(), which also handles booleans (natively
-	 * printed to true/false), and nested JSONobjects (using their own
+	 * printed to true/false), and nested JSONobjects/classes (using their own
 	 * JSONprinter) */
 	else {
 		return to!string(var);
@@ -563,10 +591,16 @@ void JSONreadvar(Type)(ref string input, ref Type var) {
 		}
 		matchCharacter(']');
 	}
-	/* If Type is itself a JSONobject (duck typing only), read it by chaining
-	 * onto the parser for the inner object. Requires parser to destructively
-	 * read from input. */
-	else static if (isJSONobject!Type) {
+	/* If Type is itself a JSONobject/class, read it by chaining onto the parser
+	 * for the inner object. Requires parser to destructively read from input.
+	 */
+	else static if (isJSONstruct!Type) {
+		var.JSONparser(input);
+	}
+	/* In addition, for a JSONclass, use default constructor and then parse, in
+	 * case subclass overrides constructor */
+	else static if (isJSONclass!Type) {
+		var = new Type();
 		var.JSONparser(input);
 	} else {
 		static assert(0, "Property parsing of type " ~ Type.stringof ~ " not implemented");
@@ -778,31 +812,31 @@ unittest {
 
 /* General parsing/writing unittest */
 unittest {
-	alias JSONobject!(
+	alias JSONstruct!(
 		"field", void)
 		TestNull;
 
-	alias JSONobject!(
+	alias JSONclass!(
 		"single", bool,
 		"array", bool[])
 		TestBoolean;
 
-	alias JSONobject!(
+	alias JSONstruct!(
 		"single", int,
 		"array", int[])
 		TestIntegral;
 
-	alias JSONobject!(
+	alias JSONclass!(
 		"single", double,
 		"array", double[])
 		TestReal;
 
-	alias JSONobject!(
+	alias JSONstruct!(
 		"single", string,
 		"array", string[])
 		TestString;
 
-	alias JSONobject!(
+	alias JSONclass!(
 		"Array", TestBoolean[],
 		"String", TestString,
 		"Real", TestReal,
@@ -811,33 +845,38 @@ unittest {
 		"Null", TestNull)
 		TestNested;
 
+	alias JSONstruct!(
+		"it", TestNested)
+		TestNested2;
+
 	/* Comprehensive test of parsing/printing capabilities */
-	TestNested x = TestNested(` { "Null" : { "field" : null } ,
+	TestNested2 x = TestNested2(` { "it" :
+		{ "Null" : { "field" : null } ,
 		"Boolean": {"single": true, "array": [true, false, true]},
 		"Integral" :{"single" :-1234 ,"array" :[ -1 ,23 ,4 ]} ,
 		"Real" : { "single" : 0.123e-4, "array" : [ 0.1, 2, 3e-4 ] },
 		"String":{"single":"test","array":["foo","bar","baz"]},
 		"Array" : [ {}, { "single":true } ]
-		} `);
+		} }`);
 
-	assert(x.Boolean.single == true);
-	assert(x.Boolean.array == [true, false, true]);
-	assert(x.Integral.single == -1234);
-	assert(x.Integral.array == [-1, 23, 4]);
-	assert(x.Real.single == 0.123e-4);
-	assert(x.Real.array == [0.1, 2, 3e-4]);
-	assert(x.String.single == "test");
-	assert(x.String.array == ["foo", "bar", "baz"]);
-	assert(x.Array[1].single == true);
+	assert(x.it.Boolean.single == true);
+	assert(x.it.Boolean.array == [true, false, true]);
+	assert(x.it.Integral.single == -1234);
+	assert(x.it.Integral.array == [-1, 23, 4]);
+	assert(x.it.Real.single == 0.123e-4);
+	assert(x.it.Real.array == [0.1, 2, 3e-4]);
+	assert(x.it.String.single == "test");
+	assert(x.it.String.array == ["foo", "bar", "baz"]);
+	assert(x.it.Array[1].single == true);
 
 	/* TODO: properly predict and test printing capabilities in toto
 	 * Issues: floating-point output */
-	assert(x.Null.toString() == `{"field":null}`);
-	assert(x.Boolean.toString() == `{"single":true,"array":[true,false,true]}`);
-	assert(x.Integral.toString() == `{"single":-1234,"array":[-1,23,4]}`);
-	assert(x.String.toString() == `{"single":"test","array":["foo","bar","baz"]}`);
+	assert(x.it.Null.toString() == `{"field":null}`);
+	assert(x.it.Boolean.toString() == `{"single":true,"array":[true,false,true]}`);
+	assert(x.it.Integral.toString() == `{"single":-1234,"array":[-1,23,4]}`);
+	assert(x.it.String.toString() == `{"single":"test","array":["foo","bar","baz"]}`);
 
-	assertThrown!ParseException(TestNested(`{`));
+	assertThrown!ParseException(TestNested2(`{`));
 
 	debug(1) {
 		writeln("dutil.json: JSON general parsing test passed");
