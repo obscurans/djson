@@ -25,12 +25,15 @@ static struct JSONstructImpl(Specification...) {
 	mixin JSONprinter!Specification;
 	mixin JSONparser!Specification;
 
-	string toString() const {
-		return "{" ~ JSONprinter() ~ "}";
+	this(string input) {
+		JSONparser(input);
 	}
 
-	this(string input) pure {
-		JSONparser(input);
+	void preParseProcessing() {}
+	void postParseProcessing() {}
+
+	string toString() const {
+		return "{" ~ JSONprinter() ~ "}";
 	}
 }
 
@@ -42,14 +45,17 @@ static class JSONclassImpl(Specification...) {
 	mixin JSONprinter!Specification;
 	mixin JSONparser!Specification;
 
-	override string toString() const {
-		return "{" ~ JSONprinter() ~ "}";
-	}
-
 	this() pure {} /* Restore default constructor */
 
-	this(string input) pure {
+	this(string input) {
 		JSONparser(input);
+	}
+
+	void preParseProcessing() {}	/* Hooks for derived classes to add */
+	void postParseProcessing() {}	/* pre- and post-processing behaviour */
+
+	override string toString() const {
+		return "{" ~ JSONprinter() ~ "}";
 	}
 }
 
@@ -369,7 +375,8 @@ pure void JSONvar_validate(string[] name, Type : JSONnull, JSONattributes attr, 
 		}
 	}
 
-	JSONvar_validate!Tail();
+	mixin .JSONvar_validate!Tail tailv;
+	tailv.JSONvar_validate();
 }
 
 pure void JSONvar_validate(string[] name, Type, JSONattributes attr, Tail...)() {
@@ -379,35 +386,8 @@ pure void JSONvar_validate(string[] name, Type, JSONattributes attr, Tail...)() 
 		}
 	}
 
-	JSONvar_validate!Tail();
-}
-
-/* Compile-time construction of the parser, which takes an input string and
- * fills in the properties of the JSON object. Destructively modifies the input
- * string, stripping off the part read. */
-pure void JSONparser(Specification...)(ref string input) {
-	mixin JSONstringUtilities!input;
-
-	skipWhitespace();
-	matchCharacter('{');
-	matchOptionalSeparator();
-
-	while (!testCharacter('}')) {
-		string name = JSONparseString(input);
-		switch (name) {
-			mixin(JSONvar_parsecases!Specification);
-			default: throw new ParseException("Invalid property name: " ~ name);
-		}
-
-		skipWhitespace();
-		if (testCharacter('}')) {
-			break;
-		}
-		matchSeparator();
-	}
-	matchCharacter('}');
-
-	JSONvar_validate!Specification();
+	mixin .JSONvar_validate!Tail tailv;
+	tailv.JSONvar_validate();
 }
 
 /* Various simple string-parsing utility functions and shorthands */
@@ -453,6 +433,39 @@ mixin template JSONstringUtilities(alias input) {
 		matchCharacter(',');
 		matchOptionalSeparator();
 	}
+}
+
+/* Compile-time construction of the parser, which takes an input string and
+ * fills in the properties of the JSON object. Destructively modifies the input
+ * string, stripping off the part read. */
+void JSONparser(Specification...)(ref string input) {
+	mixin JSONstringUtilities!input;
+
+	preParseProcessing();
+
+	skipWhitespace();
+	matchCharacter('{');
+	matchOptionalSeparator();
+
+	while (!testCharacter('}')) {
+		string name = JSONparseString(input);
+		switch (name) {
+			mixin(JSONvar_parsecases!Specification);
+			default: throw new ParseException("Invalid property name: " ~ name);
+		}
+
+		skipWhitespace();
+		if (testCharacter('}')) {
+			break;
+		}
+		matchSeparator();
+	}
+	matchCharacter('}');
+
+	mixin JSONvar_validate!Specification;
+	JSONvar_validate();
+
+	postParseProcessing();
 }
 
 /* Template function used to print variables to string by type */
@@ -532,7 +545,7 @@ unittest {
 }
 
 /* Template function used for parsing properties, by type. */
-pure void JSONreadvar(Type)(ref string input, ref Type var) {
+void JSONreadvar(Type)(ref string input, ref Type var) {
 	/* A null property requires the exact token "null" */
 	static if (is(Type : JSONnull)) {
 		if (input[0 .. 4] == "null") {
