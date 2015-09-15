@@ -62,7 +62,7 @@ enum bool isValidPrintLetter(alias print_letter) = (is(typeof("" ~ print_letter(
 class AhoCorasick(ubyte num_letter, bool skip_allowed = true, bool compress_multiple_skips = false, alias print_letter = to!char, AhoCorasickPrinting Printing = AhoCorasickPrinting.init)
 if (isValidPrintLetter!print_letter) {
 
-  alias ptrState = Rebindable!(const(State)); /* Current std.typecons hack to get mutable ref to const object */
+	alias ptrState = Rebindable!(const(State)); /* Current std.typecons hack to get mutable ref to const object */
 
 	State root;
 	ushort state_count = 0; /* Only concern is unique IDs per State */
@@ -141,62 +141,84 @@ if (isValidPrintLetter!print_letter) {
 	in {
 		assert(!dictionary_changed);
 	} body {
-		size_t index = 0;
-		bool[Thread] pool; /* List of active Threads */
-		Thread init = Thread(rebindable(root), []);
-		do {
-			pool[init] = true; /* Initialize Threads starting at root */
-		} while (State.skipMatcher(init));
+		static if (skip_allowed) { /* Nondeterministic matcher body */
+			size_t index = 0;
+			bool[Thread] pool; /* List of active Threads */
+			Thread init = Thread(rebindable(root), []);
+			do {
+				pool[init] = true; /* Initialize Threads starting at root */
+			} while (State.skipMatcher(init));
 
-		while (index < input.length) {
-			bool[Thread] pool_next; /* List of active Threads after this letter */
-			bool[Thread] pool_sub; /* List of tertiary transition heads from this letter */
-			bool[Match] pool_match; /* List of matched Threads at this letter */
+			while (index < input.length) {
+				bool[Thread] pool_next; /* List of active Threads after this letter */
+				bool[Thread] pool_sub; /* List of tertiary transition heads from this letter */
+				bool[Match] pool_match; /* List of matched Threads at this letter */
 
-			foreach (thread; pool.byKey) {
-				State.stepMatcher(thread, input[index]); /* Run matcher, updates thread */
+				foreach (thread; pool.byKey) {
+					State.stepMatcher(thread, input[index]); /* Run matcher, updates thread */
 
-				/* Loop over all tertiary transitions (voluntary fail
-				 * transitions that lead to other epsilon transitions) */
-				do {
-					if (thread !in pool_sub) {
-						Thread subthread = thread;
-						pool_sub[thread] = true;
+					/* Loop over all tertiary transitions (voluntary fail
+					 * transitions that lead to other epsilon transitions) */
+					do {
+						if (thread !in pool_sub) {
+							Thread subthread = thread;
+							pool_sub[thread] = true;
 
-						/* Loop over all epsilon transitions starting here */
-						do {
-							/* Mark new Threads */
-							if (subthread !in pool_next) {
-								pool_next[subthread] = true;
+							/* Loop over all epsilon transitions starting here */
+							do {
+								/* Mark new Threads */
+								if (subthread !in pool_next) {
+									pool_next[subthread] = true;
 
-								if (subthread.ptr.dictionary_id != 0) {
-									Match match = computeMatch(subthread, index);
-									/* Mark new Matches, as indirect matches can equal a separate Thread's direct match */
-									if (match !in pool_match) {
-										static if (is(typeof(callback(match)) : bool)) {
-											if (callback(match)) {
-												return; /* Early termination */
+									if (subthread.ptr.dictionary_id != 0) {
+										Match match = computeMatch(subthread, index);
+										/* Mark new Matches, as indirect matches can equal a separate Thread's direct match */
+										if (match !in pool_match) {
+											static if (is(typeof(callback(match)) : bool)) {
+												if (callback(match)) {
+													return; /* Early termination */
+												}
+											} else {
+												callback(match);
 											}
-										} else {
-											callback(match);
+											pool_match[match] = true;
 										}
-										pool_match[match] = true;
 									}
 								}
-							}
-						} while (State.skipMatcher(subthread));
-					}
-				} while (State.epsSkipMatcher(thread));
-			}
-
-			pool = pool_next; /* Overwrite thread pool in one step */
-			index++;
-			static if (compress_multiple_skips) {
-				/* When adjacent input characters are skippable, do not process
-				 * more than 1 */
-				while (index < input.length && input[index] == num_letter - 1 && input[index - 1] == num_letter - 1) {
-					index++;
+							} while (State.skipMatcher(subthread));
+						}
+					} while (State.epsSkipMatcher(thread));
 				}
+
+				pool = pool_next; /* Overwrite thread pool in one step */
+				index++;
+				static if (compress_multiple_skips) {
+					/* When adjacent input characters are skippable, do not process
+					 * more than 1 */
+					while (index < input.length && input[index] == num_letter - 1 && input[index - 1] == num_letter - 1) {
+						index++;
+					}
+				}
+			}
+		} else { /* Much simplified deterministic matcher body */
+			size_t index = 0;
+			Thread thread = Thread(rebindable(root), []); /* Without skips, deterministic matching */
+
+			while (index < input.length) {
+				State.stepMatcher(thread, input[index]); /* Run matcher, updates thread */
+
+				if (thread.ptr.dictionary_id != 0) {
+					Match match = computeMatch(thread, index);
+					static if (is(typeof(callback(match)) : bool)) {
+						if (callback(match)) {
+							return; /* Early termination */
+						}
+					} else {
+						callback(match);
+					}
+				}
+
+				index++;
 			}
 		}
 	}
