@@ -62,6 +62,8 @@ enum bool isValidPrintLetter(alias print_letter) = (is(typeof("" ~ print_letter(
 class AhoCorasick(ubyte num_letter, bool skip_allowed = true, bool compress_multiple_skips = false, alias print_letter = to!char, AhoCorasickPrinting Printing = AhoCorasickPrinting.init)
 if (isValidPrintLetter!print_letter) {
 
+  alias ptrState = Rebindable!(const(State)); /* Current std.typecons hack to get mutable ref to const object */
+
 	State root;
 	ushort state_count = 0; /* Only concern is unique IDs per State */
 	ubstring[] dictionary; /* List of words to match */
@@ -235,7 +237,7 @@ if (isValidPrintLetter!print_letter) {
 
 private:
 	struct Thread {
-		Rebindable!(const(State)) ptr; /* Current std.typecons hack to get mutable ref to const object */
+		ptrState ptr;
 		ubyte[] skip;
 	}
 
@@ -361,7 +363,7 @@ private:
 					scope(exit) writeln("=>", ptr, skip);
 				}
 
-				State next = ptr.getTransition(letter);
+				ptrState next = ptr.getTransition(letter);
 				if (next !is null) {
 					ptr = next;
 					return true;
@@ -393,7 +395,7 @@ private:
 		 * a transition succeeded. */
 		static bool skipMatcher(ref Thread thread) {
 			with (thread) {
-				State next = ptr.getSkipTransition();
+				ptrState next = ptr.getSkipTransition();
 				if (next is null) {
 					return false;
 				}
@@ -405,7 +407,7 @@ private:
 			}
 		}
 
-		pure State getSkipTransition() const {
+		pure inout(State) getSkipTransition() inout {
 			static if (skip_allowed) {
 				return getTransition(num_letter - 1); /* top letter hardcoded as skippable right now */
 			} else {
@@ -543,7 +545,7 @@ private:
 		}
 
 		/* Retrieves the State target, if any, on transition on this letter. */
-		const(State) getTransition(ubyte letter) const
+		inout(State) getTransition(ubyte letter) inout
 		in {
 			assert(letter < num_letter);
 		} body {
