@@ -65,7 +65,7 @@ if (isValidPrintLetter!print_letter) {
 	alias ptrState = Rebindable!(const(State)); /* Current std.typecons hack to get mutable ref to const object */
 
 	State root;
-	ushort state_count = 0; /* Only concern is unique IDs per State */
+	uint state_count = 0; /* Only concern is unique IDs per State */
 	ubstring[] dictionary; /* List of words to match */
 	bool dictionary_changed = true; /* Whether fail transitions need recomputed */
 
@@ -79,14 +79,14 @@ if (isValidPrintLetter!print_letter) {
 		root.printAll(Printing.common_prefix);
 	}
 
-	ushort getNextStateID() {
+	uint getNextStateID() {
 		return state_count++;
 	}
 
 	/* Adds a single word from array of letters, recording a positive ID.
 	 * Returns true if the word did not already exist in the dictionary. */
 	bool addWord(ubstring word) {
-		State newstate = root.addWord(word, cast(short)(dictionary.length + 1));
+		State newstate = root.addWord(word, cast(int)(dictionary.length + 1));
 		if (newstate is null) {
 			return false;
 		}
@@ -252,8 +252,17 @@ if (isValidPrintLetter!print_letter) {
 	}
 
 	void computeDerivedTransitions() {
-		State[] queue;
-		root.computeDerivedTransitions(queue);
+		State[] queue = [root];
+		while (queue.length) {
+			queue[0].computeDerivedTransitions();
+
+			/* Add all children to the queue in BFS */
+			queue[0].applyToTransitions((ubyte letter, State target) {
+				queue ~= target;
+			});
+
+			queue.popFront;
+		}
 		dictionary_changed = false;
 	}
 
@@ -285,11 +294,11 @@ private:
 			/* Next State in the fail chain with an epsilon transition */
 			State eps_transition = null;
 		}
-		ushort state_id;
+		uint state_id;
 		/* If positive, this State is a direct word match; if negative, match is
 		 * indirect (suffix of the implicitly saved string at this State is
 		 * itself a match). Zero means no match. */
-		short dictionary_id = 0;
+		int dictionary_id = 0;
 		ubyte from_letter;
 		ubyte depth; /* Length of the prefix match at this State */
 		bool is_multiple = false;
@@ -344,7 +353,7 @@ private:
 
 		/* Adds a single word, creating all necessary States, and records a
 		 * positive ID. Returns the new State if not extant in the dictionary */
-		State addWord(ubstring word, short id)
+		State addWord(ubstring word, int id)
 		in {
 			assert(id > 0);
 		} body {
@@ -475,7 +484,7 @@ private:
 			clearDerivedTransitionsImpl(0, this);
 		}
 
-		void computeDerivedTransitions(ref State[] queue) {
+		void computeDerivedTransitions() {
 			State ancestor = parent;
 			while (ancestor !is root) {
 				/* Nontrivial fail transition if some direct ancestor's fail
@@ -527,17 +536,6 @@ private:
 				} else if (fail_transition.dictionary_id < 0) {
 					dictionary_id = fail_transition.dictionary_id;
 				}
-			}
-
-			/* Add all children to the queue in BFS */
-			applyToTransitions((ubyte letter, State target) {
-				queue ~= target;
-			});
-
-			if (queue.length) {
-				State next = queue[0];
-				queue.popFront;
-				next.computeDerivedTransitions(queue);
 			}
 		}
 
