@@ -59,14 +59,19 @@ enum bool isValidPrintLetter(alias print_letter) = (is(typeof("" ~ print_letter(
  * storing indices into State list instead of pointers, at the cost of extra
  * indirection per access.
  */
-class AhoCorasick(ubyte num_letter, bool skip_allowed = true, bool compress_multiple_skips = false, alias print_letter = to!char, AhoCorasickPrinting Printing = AhoCorasickPrinting.init)
+class AhoCorasick(ubyte num_letter, bool skip_allowed = true, bool compress_multiple_skips = false,
+bool callback_recursive = false, alias print_letter = to!char,
+AhoCorasickPrinting Printing = AhoCorasickPrinting.init)
 if (isValidPrintLetter!print_letter) {
-
-	alias ptrState = Rebindable!(const(State)); /* Current std.typecons hack to get mutable ref to const object */
+	/* Current std.typecons hack to get mutable ref to const object */
+	alias ptrState = Rebindable!(const(State));
 
 	State root;
 	uint state_count = 0; /* Only concern is unique IDs per State */
 	ubstring[] dictionary; /* List of words to match */
+	static if (callback_recursive) {
+		int[] next_match; /* ID of the next completely included match */
+	}
 	bool dictionary_changed = true; /* Whether fail transitions need recomputed */
 
 	this() {
@@ -174,12 +179,8 @@ if (isValidPrintLetter!print_letter) {
 										Match match = computeMatch(subthread, index);
 										/* Mark new Matches, as indirect matches can equal a separate Thread's direct match */
 										if (match !in pool_match) {
-											static if (is(typeof(callback(match)) : bool)) {
-												if (callback(match)) {
-													return; /* Early termination */
-												}
-											} else {
-												callback(match);
+											if (handleMatch(subthread, index, callback)) {
+												return;
 											}
 											pool_match[match] = true;
 										}
@@ -208,13 +209,8 @@ if (isValidPrintLetter!print_letter) {
 				State.stepMatcher(thread, input[index]); /* Run matcher, updates thread */
 
 				if (thread.ptr.dictionary_id != 0) {
-					Match match = computeMatch(thread, index);
-					static if (is(typeof(callback(match)) : bool)) {
-						if (callback(match)) {
-							return; /* Early termination */
-						}
-					} else {
-						callback(match);
+					if (handleMatch(thread, index, callback)) {
+						return; /* Early termination */
 					}
 				}
 
@@ -223,7 +219,49 @@ if (isValidPrintLetter!print_letter) {
 		}
 	}
 
-	pure Match computeMatch(Thread thread, size_t index) const
+	/* Logic for doing all the callbacks required on Match(es) found. Returns true
+	 * if callback at any time returned true, indicating early termination */
+	bool handleMatch(FPtr)(const Thread thread, size_t index, FPtr callback) const
+	if (isCallable!FPtr && is(typeof(callback(Match()))))
+	in {
+		assert(thread.ptr !is null && thread.ptr.dictionary_id != 0);
+	} body {
+		Match match = computeMatch(thread, index);
+
+		bool doCallback() {
+			static if (is(typeof(callback(match)) : bool)) {
+				if (callback(match)) {
+					return true; /* Early termination */
+				}
+			} else {
+				callback(match);
+			}
+			return false;
+		}
+
+		static if (callback_recursive) {
+			int id;
+			if (thread.ptr.dictionary_id > 0) {
+				id = thread.ptr.dictionary_id - 1;
+			} else {
+				id = -thread.ptr.dictionary_id - 1;
+			}
+			while (match.word !is null) {
+				if (doCallback()) {
+					return true;
+				}
+				match = nextMatch(match, id);
+			}
+		} else {
+			if (doCallback()) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	pure Match computeMatch(const Thread thread, size_t index) const
 	in {
 		assert(thread.ptr !is null && thread.ptr.dictionary_id != 0);
 	} out(ret) {
@@ -231,7 +269,7 @@ if (isValidPrintLetter!print_letter) {
 	} body {
 		with (thread) {
 			if (ptr.dictionary_id > 0) { /* Direct match */
-				return Match(dictionary[ptr.dictionary_id - 1], skip, index);
+				return Match(dictionary[ptr.dictionary_id - 1], skip.dup, index);
 			} else {
 				Match ret;
 				ret.skip = skip.dup;
@@ -246,15 +284,77 @@ if (isValidPrintLetter!print_letter) {
 		}
 	}
 
+	static if (callback_recursive) {
+		pure Match nextMatch(Match current, ref int id) const
+		in {
+			assert(current.word == dictionary[id]);
+		} out(ret) {
+			if (id >= 0) {
+				assert(ret.word == dictionary[id]);
+			} else {
+				assert(ret.word is null);
+			}
+		} body {
+			if (next_match[id] >= 0) {
+				id = next_match[id];
+
+				Match ret;
+				ret.skip = current.skip.dup;
+				ret.word = dictionary[id];
+				ret.index = current.index;
+
+				assert(current.word.length > ret.word.length);
+				shiftSkip(ret.skip, cast(ubyte)(current.word.length - ret.word.length));
+				return ret;
+			} else {
+				id = -1;
+				return Match(null, null, 0);
+			}
+		}
+	}
+
 	void clearDerivedTransitions() {
 		root.clearDerivedTransitions();
+		static if (callback_recursive) {
+			next_match.length = 0;
+		}
 		dictionary_changed = true;
 	}
 
-	void computeDerivedTransitions() {
+	void computeDerivedTransitions()
+	out {
+		static if (callback_recursive) {
+			foreach (match; next_match) {
+				assert(match >= -1);
+			}
+		}
+	} body {
+		static if (callback_recursive) {
+			next_match.length = dictionary.length;
+			version(assert) {
+				next_match[] = -2;
+			}
+		}
+
 		State[] queue = [root];
 		while (queue.length) {
 			queue[0].computeDerivedTransitions();
+
+			static if (callback_recursive) {
+				int id = queue[0].dictionary_id - 1;
+				if (id >= 0) { /* If this is a direct match */
+					next_match[id] = -1;
+					State ancestor = queue[0].fail_transition;
+					while (ancestor != root) { /* Take fail transitions until next match */
+						if (ancestor.dictionary_id > 0) {
+							next_match[id] = ancestor.dictionary_id - 1;
+							break;
+						} else {
+							ancestor = ancestor.fail_transition;
+						}
+					}
+				}
+			}
 
 			/* Add all children to the queue in BFS */
 			queue[0].applyToTransitions((ubyte letter, State target) {
@@ -694,7 +794,7 @@ version(unittest) {
 
 /* State single/multiple-transition storage testing */
 unittest {
-	AhoCorasick!4 o = new AhoCorasick!4();
+	AhoCorasick!4 o = new AhoCorasick!4;
 	with (AhoCorasick!4) {
 		State s = o.new State(null);
 		State s2 = o.new State(null);
@@ -752,7 +852,7 @@ unittest {
 
 /* Testing deterministic string matching behaviour */
 unittest {
-	auto o = new AhoCorasick!(4, false, false, print_NA_);
+	auto o = new AhoCorasick!(4, false, false, true, print_NA_);
 	ubstring[] dictionary = [
 		[0, 1, 2, 3],
 		[0, 2, 2, 3],
@@ -766,9 +866,14 @@ unittest {
 	Match[] expected = [
 		{[3], [], 0},
 		{[2, 3], [], 2},
+		{[3], [], 2}, /* Included match */
 		{[1, 2], [], 5}, /* Indirect match */
 		{[0, 1, 2, 3], [], 6},
-		{[0, 2, 2, 3], [], 10}];
+		{[2, 3], [], 6}, /* Included match */
+		{[3], [], 6}, /* Included match */
+		{[0, 2, 2, 3], [], 10},
+		{[2, 3], [], 10}, /* Included match */
+		{[3], [], 10} /* Included match */];
 
 	auto checkMatches = (Match match) {
 		assert(match == expected[0]);
@@ -785,7 +890,7 @@ unittest {
 
 /* Testing NFA (skip-enabled) string matching behaviour */
 unittest {
-	auto o = new AhoCorasick!(5, true, false, print_NA_);
+	auto o = new AhoCorasick!(5, true, false, false, print_NA_);
 	ubstring[] dictionary = [
 		[4, 0, 1, 2],
 		[0, 1, 2],
