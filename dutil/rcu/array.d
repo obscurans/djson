@@ -124,7 +124,7 @@ private:
 		/* Cast from immutable: GC extending block of memory, presumed no movement */
 		auto ext = GC.extend(cast(Unqual!T*)data.array.ptr, nelems * T.sizeof, (len_good - len) * T.sizeof);
 		if (ext) {
-			return new Data(data.array, data.capacity + ext / T.sizeof);
+			return new Data(data.array, ext / T.sizeof);
 		}
 
 		auto n_array = GC.qalloc(len_good * T.sizeof, blockAttribute!T);
