@@ -145,10 +145,12 @@ private template blockAttribute(T) {
 }
 
 version(unittest) {
-	import std.stdio, std.algorithm, std.random, core.thread;
+	import std.stdio;
 }
 
 unittest {
+	import std.algorithm, std.random, core.thread;
+
 	final class Producer(T) : Thread {
 		shared AppendOnlyArray!T array;
 		T[][] chunk_buffer;
