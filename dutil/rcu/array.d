@@ -19,20 +19,25 @@ shared final class appendOnlyArray(T) {
 		data = cast(shared)(new Data(array));
 	}
 
+	@property shared(inout(T[])) array const {
+		auto tl_data = atomicLoad!(MemoryOrder.acq)(data);
+		return tl_data.array;
+	}
+
 	@property size_t length() const {
-		return data.array.length;
+		return array.length;
 	}
 
 	shared(inout(T[])) opIndex() inout {
-		return data.array;
+		return array;
 	}
 
 	shared(inout(T)) opIndex(size_t ind) inout {
-		return data.array[ind];
+		return array[ind];
 	}
 
 	shared(inout(T[])) opIndex(Pair ind) inout {
-		return data.array[ind.a .. ind.b];
+		return array[ind.a .. ind.b];
 	}
 
 	Pair opSlice(size_t dim)(size_t a, size_t b) const {
@@ -62,7 +67,6 @@ shared final class appendOnlyArray(T) {
 		x_array[len .. len + items.length] = items;
 
 		Data* new_data = new Data(x_array, tl_data.capacity);
-
 		atomicStore!(MemoryOrder.rel)(data, cast(shared)new_data);
 	}
 
