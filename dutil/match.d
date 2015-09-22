@@ -23,6 +23,48 @@ pure char print_NA_(ubyte letter) {
 	}
 }
 
+pure bool predm_trivial(ubstring input, size_t index, size_t length)
+in {
+	assert(index < input.length);
+} body {
+	return true;
+}
+
+pure bool predm_require_boundary(ubyte marker)(ubstring input, size_t index, size_t length)
+in {
+	assert(index < input.length);
+} body {
+	if (index < input.length - 1 && !(input[index] == marker || input[index + 1] == marker)) {
+		return false;
+	}
+	if (index >= length && !(input[index - length] == marker || input[index - length + 1] == marker)) {
+		return false;
+	}
+	return true;
+}
+
+pure bool predc_trivial(ubstring ancestor, ubstring current)
+in {
+	assert(current.length > ancestor.length);
+	assert(current[current.length - ancestor.length .. $] == ancestor);
+} body {
+	return true;
+}
+
+pure bool predc_require_boundary(ubyte marker)(ubstring ancestor, ubstring current)
+in {
+	assert(current.length > ancestor.length);
+	assert(current[current.length - ancestor.length .. $] == ancestor);
+} body {
+	if (ancestor[0] == marker) {
+		return true;
+	}
+	if (current[current.length - ancestor.length - 1] == marker) {
+		return true;
+	}
+	return false;
+}
+
 /* The information passed to the callback on a match: the dictionary word that
  * matched; the sorted indices of said word that are skipped during the match;
  * the zero-based index of the last character at the matching point */
@@ -61,8 +103,11 @@ enum bool isValidPrintLetter(alias print_letter) = (is(typeof("" ~ print_letter(
  */
 class AhoCorasick(ubyte num_letter, bool skip_allowed = true, bool compress_multiple_skips = false,
 bool callback_recursive = false, alias print_letter = to!char,
-AhoCorasickPrinting Printing = AhoCorasickPrinting.init)
-if (isValidPrintLetter!print_letter) {
+AhoCorasickPrinting Printing = AhoCorasickPrinting.init, alias match_filter_pred = predm_trivial,
+alias callback_filter_pred = predc_trivial)
+if (isValidPrintLetter!print_letter &&
+is(typeof(match_filter_pred(cast(ubstring)[], cast(size_t)0, cast(size_t)0)) : bool) &&
+is(typeof(callback_filter_pred(cast(ubstring)[], cast(ubstring)[])) : bool)) {
 	/* Current std.typecons hack to get mutable ref to const object */
 	alias ptrState = Rebindable!(const(State));
 
@@ -209,8 +254,10 @@ if (isValidPrintLetter!print_letter) {
 				State.stepMatcher(thread, input[index]); /* Run matcher, updates thread */
 
 				if (thread.ptr.dictionary_id != 0) {
-					if (handleMatch(thread, index, callback)) {
-						return; /* Early termination */
+					if (match_filter_pred(input, index, dictionary[normalize_id(thread.ptr.dictionary_id)].length)) {
+						if (handleMatch(thread, index, callback)) {
+							return; /* Early termination */
+						}
 					}
 				}
 
@@ -240,12 +287,7 @@ if (isValidPrintLetter!print_letter) {
 		}
 
 		static if (callback_recursive) {
-			int id;
-			if (thread.ptr.dictionary_id > 0) {
-				id = thread.ptr.dictionary_id - 1;
-			} else {
-				id = -thread.ptr.dictionary_id - 1;
-			}
+			int id = normalize_id(thread.ptr.dictionary_id);
 			while (match.word !is null) {
 				if (doCallback()) {
 					return true;
@@ -269,11 +311,11 @@ if (isValidPrintLetter!print_letter) {
 	} body {
 		with (thread) {
 			if (ptr.dictionary_id > 0) { /* Direct match */
-				return Match(dictionary[ptr.dictionary_id - 1], skip.dup, index);
+				return Match(dictionary[normalize_id(ptr.dictionary_id)], skip.dup, index);
 			} else {
 				Match ret;
 				ret.skip = skip.dup;
-				ret.word = dictionary[-ptr.dictionary_id - 1];
+				ret.word = dictionary[normalize_id(ptr.dictionary_id)];
 				ret.index = index;
 
 				assert(ptr.depth > ret.word.length);
@@ -341,12 +383,14 @@ if (isValidPrintLetter!print_letter) {
 			queue[0].computeDerivedTransitions();
 
 			static if (callback_recursive) {
-				int id = queue[0].dictionary_id - 1;
-				if (id >= 0) { /* If this is a direct match */
+				int id = queue[0].dictionary_id;
+				if (id > 0) { /* If this is a direct match */
+					id = normalize_id(id);
 					next_match[id] = -1;
 					State ancestor = queue[0].fail_transition;
 					while (ancestor != root) { /* Take fail transitions until next match */
-						if (ancestor.dictionary_id > 0) {
+						if (ancestor.dictionary_id > 0 &&
+						callback_filter_pred(dictionary[normalize_id(ancestor.dictionary_id)], dictionary[id])) {
 							next_match[id] = ancestor.dictionary_id - 1;
 							break;
 						} else {
@@ -364,6 +408,17 @@ if (isValidPrintLetter!print_letter) {
 			queue.popFront;
 		}
 		dictionary_changed = false;
+	}
+
+	pure uint normalize_id(int id) const
+	in {
+		assert(id != 0);
+	} body {
+		if (id > 0) {
+			return id - 1;
+		} else {
+			return -id - 1;
+		}
 	}
 
 private:
